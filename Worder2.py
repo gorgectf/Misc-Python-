@@ -29,7 +29,7 @@ def assign_letters(word: str, c1: int, c2: int, c3: int) -> list[str]:
         numbers: list[int] = result[1]
 
         for i in range(len(numbers)):
-            if numbers[i] - 1 > len(numbers):
+            if numbers[i] - 1 >= len(word):
                 continue
             else:
                 letters[i] = word[numbers[i] - 1]   
