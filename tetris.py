@@ -391,7 +391,17 @@ def main(stdscr) -> bool:
         |/_____\|/_____\|/_____\|/_____\|/_____\|/_____\|
         """)
 
-    stdscr.addstr(10, 10, "Press any key to begin.")
+    stdscr.addstr(6, 10, "v1.0.0")
+
+    stdscr.addstr(8, 10, "Its recommended to go fullscreen to avoid screen render issues.")
+    stdscr.addstr(10, 10, "Controls: A - Left, D - Right, W - Rotate, R - Hold, ESC - Quit")
+    stdscr.addstr(12, 10, "It will say 'curses() ERR' if your screen is not wide enough. Restart if this happens.")
+    stdscr.addstr(14, 10, "Press any key to begin.")
+
+    stdscr.addstr(18, 10, "Known issues:")
+    stdscr.addstr(19, 10, "1. Blocks that drop on the corner of another block on the next frame will absorb them. ")
+    stdscr.addstr(20, 10, "2. Blocks that rotate on the right edge of the screen when theres a lot of placed blocks get a part of them removed for some reason.")
+    stdscr.addstr(21, 10, "3. End game screen may not always display if a ton of blocks get piled.")
     stdscr.getch()
 
     curses.start_color()
