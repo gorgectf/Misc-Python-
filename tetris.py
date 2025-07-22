@@ -109,7 +109,7 @@ def clear_row_n() -> None:
                             count += 1
                             
                     else:
-                        BLOCKS.sort()
+                        #BLOCKS.sort()
                         LEVEL += 1
             i += 1
 
@@ -138,17 +138,6 @@ def gravity() -> None:
                 BLOCKS.sort()
                 return
                 
-def boundary_checker() -> bool:
-    for coords in CURRENT_BLOCK:
-        x: int = coords[0] # UD
-        y: int = coords[1] # LR
-
-        if (x + 1 >= HEIGHT):
-            return False
-            
-        if x == HEIGHT:
-            return False
-    return True
 
 def input_fetcher(key: int) -> int: 
     match key:
@@ -164,6 +153,10 @@ def input_fetcher(key: int) -> int:
             return 3
         case 114 | 82: # r, R - Hold block
             return 4
+        case 122 | 90: # Double move left
+            return 5
+        case 120 | 88: # Double move right
+            return 6
         case _:
             return 0
         
@@ -253,6 +246,12 @@ def update(stdscr, movement: int, fast_fall: int = 0) -> None:  # Return True if
         fast_fall = 1
         movement = 0
 
+    if movement == 5:
+        movement = -2
+    
+    if movement == 6:
+        movement = 2
+
     if movement == 4:
         dict_pos_copy = copy.deepcopy(BLC_TYPE)
         
@@ -271,7 +270,7 @@ def update(stdscr, movement: int, fast_fall: int = 0) -> None:  # Return True if
     tuples: list[tuple[int, ...]] = [tuple(x) for x in CURRENT_BLOCK]
 
     # Game Over
-    if all(elem in BLOCKS for elem in tuples) and HELD_BLOCK == "":
+    if all(elem in BLOCKS for elem in tuples):
         for x in range(HEIGHT):
             for y in range(WIDTH):
                 stdscr.addstr(x, y, " ")
@@ -309,22 +308,27 @@ def update(stdscr, movement: int, fast_fall: int = 0) -> None:  # Return True if
 
         if tuple((arrayx, (0 <= (arrayy + movement) <= WIDTH - 1))) == False:
             movement = 0
-            
+                
     for i, item in enumerate(CURRENT_BLOCK):
         temp: list[int] = copy.deepcopy(item)
         x: int = temp[0] # UD
         y: int = temp[1] # LR
         new_pos = list()
 
-        if (x + 1 >= HEIGHT):
+        if (x + 1 >= HEIGHT) and movement == 0:
             save_blocks()
             return
                 
-        if x >= HEIGHT:
+        if x >= HEIGHT and movement == 0:
             save_blocks()
             return
         
         if (x + (1 + fast_fall)) >= HEIGHT:
+            fast_fall = -1
+
+        fast_fall_pos = tuple(((x + (1 + fast_fall)), y))
+
+        if  fast_fall_pos in BLOCKS:
             fast_fall = -1
                     
         x += 1 + fast_fall
@@ -334,9 +338,7 @@ def update(stdscr, movement: int, fast_fall: int = 0) -> None:  # Return True if
         
         y += movement
 
-        new_pos = list()
-        new_pos = [x, y]
-
+        new_pos: list = [x, y]
         blocks_tuples = tuple(new_pos)
 
         if blocks_tuples in BLOCKS:
@@ -373,38 +375,15 @@ def render(stdscr) -> None:
 
             stdscr.addstr(cblock_x, cblock_y, "#", curses.color_pair(8))
     except ValueError as e:
-        stdscr.addstr(0, 0, f"Render error: {e}")
+        stdscr.addstr(0, 0, f"Render error: {e}.")
         return
     except curses.error as f:
-        stdscr.addstr(0, 0, f"Curses error: {f}")
+        stdscr.addstr(0, 0, f"Curses error: {f}. Restart and resize screen.")
         return
 
-def main(stdscr) -> bool:
-    global CURRENT_BLOCK, CURRENT_TYPE, X_TOP_OFFSET, Y_TOP_OFFSET, COLOUR_PAIRS
+def init_colours() -> None:
+    global COLOUR_PAIRS
 
-    stdscr.addstr(0, 0, r"""
-        _______ _______ _______ _______ _______ _______ 
-        |\     /|\     /|\     /|\     /|\     /|\     /|
-        | +---+ | +---+ | +---+ | +---+ | +---+ | +---+ |
-        | |T  | | |E  | | |T  | | |R  | | |I  | | |S  | |
-        | +---+ | +---+ | +---+ | +---+ | +---+ | +---+ |
-        |/_____\|/_____\|/_____\|/_____\|/_____\|/_____\|
-        """)
-
-    stdscr.addstr(6, 10, "v1.0.0")
-
-    stdscr.addstr(8, 10, "Its recommended to go fullscreen to avoid screen render issues.")
-    stdscr.addstr(10, 10, "Controls: A - Left, D - Right, W - Rotate, R - Hold, ESC - Quit")
-    stdscr.addstr(12, 10, "It will say 'curses() ERR' if your screen is not wide enough. Restart if this happens.")
-    stdscr.addstr(14, 10, "Press any key to begin.")
-
-    stdscr.addstr(18, 10, "Known issues:")
-    stdscr.addstr(19, 10, "1. Blocks that drop on the corner of another block on the next frame will absorb them. ")
-    stdscr.addstr(20, 10, "2. Blocks that rotate on the right edge of the screen when theres a lot of placed blocks get a part of them removed for some reason.")
-    stdscr.addstr(21, 10, "3. End game screen may not always display if a ton of blocks get piled.")
-    stdscr.getch()
-
-    curses.start_color()
     curses.init_pair(1, curses.COLOR_CYAN, curses.COLOR_WHITE)     # I
     curses.init_pair(2, curses.COLOR_BLUE, curses.COLOR_WHITE)     # J
     curses.init_pair(3, curses.COLOR_YELLOW, curses.COLOR_WHITE)   # L (approximation for orange)
@@ -422,14 +401,44 @@ def main(stdscr) -> bool:
             'S': curses.color_pair(5),
             'T': curses.color_pair(6),
             'Z': curses.color_pair(7)
-    }    
+    }   
 
-    dict_copy: dict[str, list[list[int]]] = copy.deepcopy(BLC_TYPE)
+def display_intro_text(stdscr) -> None:
+    stdscr.addstr(0, 0, r"""
+        _______ _______ _______ _______ _______ _______ 
+        |\     /|\     /|\     /|\     /|\     /|\     /|
+        | +---+ | +---+ | +---+ | +---+ | +---+ | +---+ |
+        | |T  | | |E  | | |T  | | |R  | | |I  | | |S  | |
+        | +---+ | +---+ | +---+ | +---+ | +---+ | +---+ |
+        |/_____\|/_____\|/_____\|/_____\|/_____\|/_____\|
+        """)
 
-    letter: int = random.randint(0, len(LOOKUP_OBJ) - 1)
-    CURRENT_TYPE = LOOKUP_OBJ[letter]
-    CURRENT_BLOCK = dict_copy[LOOKUP_OBJ[letter]]
-    
+    stdscr.addstr(6, 10, "v1.0.1")
+    stdscr.addstr(8, 10, "It is recommended to go fullscreen to avoid errors. Minimum dimension: 800x850 px")
+    stdscr.addstr(10, 10, "Controls: A - Left, D - Right, W - Rotate, R - Hold, ESC - Quit, Z - Move 2 spaces left, X - Move 2 spaces right")
+    stdscr.addstr(12, 10, "It will say 'curses() ERR' if your screen is not large enough. Restart if this happens.")
+    stdscr.addstr(14, 10, "Press any key, or resize the terminal, to begin.")
+
+    stdscr.addstr(18, 10, "Known issues:")
+    stdscr.addstr(20, 10, "1. Blocks that rotate on the right edge of the screen when theres a lot of placed blocks get a part of them removed for some reason.")
+    stdscr.getch()
+
+def level_up(base_wait: int) -> int:
+    division: int = (LEVEL // 8).__trunc__()
+    base_wait /= max(1, division) # type: ignore
+
+    if base_wait < 100: 
+        base_wait = 100
+
+    return int(base_wait)
+
+def main(stdscr) -> None:
+    global CURRENT_BLOCK, CURRENT_TYPE, X_TOP_OFFSET, Y_TOP_OFFSET
+
+    display_intro_text(stdscr)
+    curses.start_color()
+    init_colours()    
+
     terminal_h: int; terminal_w: int
     terminal_h, terminal_w = stdscr.getmaxyx()
 
@@ -437,21 +446,20 @@ def main(stdscr) -> bool:
     X_TOP_OFFSET = (terminal_h // 2) - HEIGHT
 
     stdscr.nodelay(True)
+
+    dict_copy = copy.deepcopy(BLC_TYPE)
+    letter: int = random.randint(0, len(LOOKUP_OBJ) - 1)
+    CURRENT_TYPE = LOOKUP_OBJ[letter]
+    CURRENT_BLOCK = dict_copy[LOOKUP_OBJ[letter]]
+    del dict_copy
+    
     base_wait: int = 240
 
-    running: bool = True 
-
-    while running:
+    while True:
         key = stdscr.getch()
         ordkey = input_fetcher(key)
 
-        division: int = (LEVEL // 8).__round__(1)
-        base_wait /= max(1, division) # type: ignore
-        base_wait = int(base_wait)
-
-        if base_wait < 90: 
-            base_wait = 90
-
+        base_wait = level_up(base_wait)
         stdscr.timeout(base_wait)
 
         stdscr.clear()
@@ -459,8 +467,6 @@ def main(stdscr) -> bool:
         gravity()
         clear_row_n()
         render(stdscr)
-
-    return True
 
 if __name__ == "__main__":
     wrapper(main)
