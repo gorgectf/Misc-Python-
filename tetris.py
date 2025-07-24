@@ -1,4 +1,4 @@
-import curses, random, copy, functools, time, sys
+import curses, random, copy, time, sys
 from curses import wrapper
 
 SCREEN: list = []
