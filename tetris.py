@@ -1,23 +1,9 @@
-import curses, random, copy, time
+import curses, random, copy, functools, time, sys
 from curses import wrapper
 
-WIDTH: int = 15
-HEIGHT: int = 20
-HALF_H: int= int(HEIGHT // 2)
-X_TOP_OFFSET: int = 10
-Y_TOP_OFFSET: int = 10
-
-BG_CHARACTER: str = "."
-SCREEN: list[list[str]]= [[BG_CHARACTER for x in range(WIDTH)] for y in range(HEIGHT)] # The background screen
-BLOCKS: list = list() # Holds [x, y]'s all placed blocks
-CURRENT_BLOCK: list[list[int]] = list() # Holds the [x, y]'s of the currently active block
-CURRENT_TYPE: str = "I"
-HELD_BLOCK: str = ""
-
-SCORE: int = 1
-LEVEL: int = 0
-
-COLOUR_PAIRS: dict[str, int] = {}
+SCREEN: list = []
+BLOCK_TYPE: dict[str, list] = {}
+COLOUR_PAIRS: dict = {}
 
 LOOKUP_OBJ: dict[int, str] = {
     0: "I",
@@ -29,359 +15,198 @@ LOOKUP_OBJ: dict[int, str] = {
     6: "Z",
 }
 
-# Pivot point = first value
-BLC_TYPE: dict[str, list[list[int]]] = {
-    "I": [[0, HALF_H - 2],
-          [1, HALF_H - 2],
-          [2, HALF_H - 2],
-          [3, HALF_H - 2]],
-    "J": [[0, HALF_H - 2],
-          [1, HALF_H - 2],
-          [2, HALF_H - 2],
-          [2, HALF_H - 1 - 2]],
-    "L": [[0, HALF_H - 2],
-          [1, HALF_H - 2],
-          [2, HALF_H - 2],
-          [2, HALF_H + 1 - 2]],
-    "O": [[0, HALF_H - 2],
-          [1, HALF_H - 2],
-          [0, HALF_H + 1 - 2],
-          [1, HALF_H + 1 - 2]],
-    "S": [[0, HALF_H - 2],
-          [0, HALF_H + 1 - 2],
-          [1, HALF_H - 2],
-          [1, HALF_H - 1 - 2]],
-    "T": [[0, HALF_H - 2],
-          [0, HALF_H - 1 - 2],
-          [0, HALF_H + 1 - 2],
-          [1, HALF_H - 2]],
-    "Z": [[0, HALF_H - 2],
-          [0, HALF_H - 1 - 2],
-          [1, HALF_H - 2],
-          [1, HALF_H + 1 - 2]],
-}
+class GameState:
+    """Game state manager handling score, level, block positions, and gameplay mechanics."""
+    score: int = 0
+    level: int = 0
+    current_block = list()
+    current_type: str = "I"
+    held_block: str = ""
+    blocks = list()
 
-def save_blocks() -> None:
-    global CURRENT_BLOCK, CURRENT_TYPE, BLOCKS, SCORE, LEVEL
+    def __init__(self, width: int, height: int, terminal_h: int, terminal_w: int, bg_character: str) -> None:
+        """ Initializes screen using width, height parameter. \n 
+        Sets screen x and y offset and declares block type dict."""
+        global SCREEN, BLOCK_TYPE
+        self.width = width
+        self.height = height
+        self.x_offset = (terminal_h // 2) - height
+        self.y_offset = (terminal_w // 2) - width
+        self.half_h = self.height // 2
 
-    for item in CURRENT_BLOCK:
-        current_tuple: list[int] = item
-        item = tuple(item)
-        BLOCKS.append(item)
+        SCREEN = [[bg_character for x in range(self.width)] for y in range(self.height)]
 
-    dict_copy: dict[str, list[list[int]]] = copy.deepcopy(BLC_TYPE)
-    letter: int = random.randint(0, len(LOOKUP_OBJ) - 1)
-    CURRENT_TYPE = LOOKUP_OBJ[letter]
-    lookup: str = str(LOOKUP_OBJ[letter])
-    CURRENT_BLOCK = dict_copy[lookup]
-    SCORE += 10
+        BLOCK_TYPE = {
+            "I": [[0, self.half_h - 2],
+                [1, self.half_h - 2],
+                [2, self.half_h - 2],
+                [3, self.half_h - 2]],
+            "J": [[0, self.half_h - 2],
+                [1, self.half_h - 2],
+                [2, self.half_h - 2],
+                [2, self.half_h - 1 - 2]],
+            "L": [[0, self.half_h - 2],
+                [1, self.half_h - 2],
+                [2, self.half_h - 2],
+                [2, self.half_h + 1 - 2]],
+            "O": [[0, self.half_h - 2],
+                [1, self.half_h - 2],
+                [0, self.half_h + 1 - 2],
+                [1, self.half_h + 1 - 2]],
+            "S": [[0, self.half_h - 2],
+                [0, self.half_h + 1 - 2],
+                [1, self.half_h - 2],
+                [1, self.half_h - 1 - 2]],
+            "T": [[0, self.half_h - 2],
+                [0, self.half_h - 1 - 2],
+                [0, self.half_h + 1 - 2],
+                [1, self.half_h - 2]],
+            "Z": [[0, self.half_h - 2],
+                [0, self.half_h - 1 - 2],
+                [1, self.half_h - 2],
+                [1, self.half_h + 1 - 2]],
+        }
 
-def clear_row_n() -> None:
-    global BLOCKS, SCORE, LEVEL
+    def level_up(self, base_wait: int) -> int:
+        """ Decreases the waiting time to accept input in the main loop. \n
+            new_level = current_level / 8 \n
+            new_level = new_level.__trunc__() \n
+            base_wait = max(1, new_level) \n
+        """
+        division: int = (GameState.level // 8).__trunc__()
+        base_wait /= max(1, division) # type: ignore
+    
 
-    BLOCKS.sort()
-    i: int = 0
+        if base_wait < 100: 
+            base_wait = 100
 
-    if len(BLOCKS) > WIDTH:
-        while True:
-            item: list = BLOCKS[i]
-            x: int = item[0]
-            y: int = item[1]
+        return int(base_wait)
 
-            to_compare: list = BLOCKS[i + (WIDTH - 1)]
-            x_compare: int = to_compare[0]
-            y_compare: int = to_compare[1]
+    def next_block(self) -> None:
+        """ Gets the next block by using a random number from 0 to 7 and looking at the LOOKUP_OBJ for the type. """
+        global BLOCK_TYPE
 
-            to_delete = list()
-            if x == x_compare:
-                if (y + (WIDTH - 1)) == y_compare:
-                    for j in range(i, (i + (WIDTH)), 1):
-                        to_delete.append(BLOCKS[j])
+        dict_copy: dict = copy.deepcopy(BLOCK_TYPE)
+        letter: int = random.randint(0, len(LOOKUP_OBJ) - 1)
+        GameState.current_type = LOOKUP_OBJ[letter]
+        lookup = str(LOOKUP_OBJ[letter])
+        GameState.current_block = dict_copy[lookup]
 
-                    count: int = 0
-                    for item in to_delete:
-                        while item in BLOCKS:
-                            if count == WIDTH * 4:
-                                SCORE += 4000
+    def save_blocks(self) -> None:
+        """ Loops through the positions of the current block and adds them to the total blocks, then sorts the total blocks."""
+        for item in GameState.current_block:
+            current_tuple: list[int] = item
+            item = tuple(item)
+            GameState.blocks.append(item)
 
-                            BLOCKS.remove(item)
-                            SCORE += 100
-                            count += 1
-                            
-                    else:
-                        #BLOCKS.sort()
-                        LEVEL += 1
-            i += 1
+        self.next_block()
 
-            if (i > len(BLOCKS) - 1 or (i + (WIDTH - 1)) > len(BLOCKS) - 1):
-                BLOCKS.sort()
-                break
+    def shift_blocks(self, left) -> None:
+        """ Shift blocks left or right if they will be out of bounds in the next iteration. """
+        shift: int = 0
+        y_positions = list()
+        expression: str = ">"
 
-def gravity() -> None:
-    if len(BLOCKS) > 0:
-        for i, block in enumerate(BLOCKS):
-            tempx: int = block[0]
-            tempy: int = block[1]
-
-            incr_x: int = tempx + 1
-
-            while incr_x < HEIGHT:
-                new = tuple((incr_x, tempy))
-
-                if new not in BLOCKS:
-                    BLOCKS[i] = new
-
-                    incr_x += 1
-                else:
-                    break
-            else:
-                BLOCKS.sort()
-                return
-                
-
-def input_fetcher(key: int) -> int: 
-    match key:
-        case 27: # ESC
-            quit()
-        case 97 | 65: # a, A - Move left
-            return -1
-        case 100 | 68: # d, D - Move right
-            return 1
-        case 119| 87: # w, W -Rotate
-            return 2
-        case 115 | 83: # s, S - Fast fall
-            return 3
-        case 114 | 82: # r, R - Hold block
-            return 4
-        case 122 | 90: # Double move left
-            return 5
-        case 120 | 88: # Double move right
-            return 6
-        case _:
-            return 0
-        
-def shift_into_screen(left: bool) -> None: # LR = True = Shift all positions left. False = shift all positions right
-    shift: int = 0
-    y_positions = list()
-    expression: str = ">"
-
-    for block in CURRENT_BLOCK:
-        y: int = block[1]
-        y_positions.append(y)
-
-    if left:
-        expression = "<"
-
-    for pos in y_positions:
-        if eval(f"{pos} {expression} {shift}"):
-            shift = pos
-
-    if left:
-        shift = abs(shift) + 1
-    else:
-        shift -= WIDTH - 1
-
-    for i, tupl in enumerate(CURRENT_BLOCK):
-        tupl = CURRENT_BLOCK[i]
-        tuple_y = tupl[1]
+        for block in GameState.current_block:
+            y: int = block[1]
+            y_positions.append(y)
 
         if left:
-            tuple_y += shift
+            expression = "<"
+
+        for pos in y_positions:
+            if eval(f"{pos} {expression} {shift}"):
+                shift = pos
+
+        if left:
+            shift = abs(shift) + 1
         else:
-            tuple_y -= shift
+            shift -= self.width - 1
 
-        new = tuple((tupl[0], tuple_y))
-        CURRENT_BLOCK[i] = new # type: ignore
+        for i, block in enumerate(GameState.current_block):
+            block = GameState.current_block[i]
+            tuple_y = block[1]
 
-def rotate() -> None:
-    global CURRENT_BLOCK
+            if left:
+                tuple_y += shift
+            else:
+                tuple_y -= shift
 
-    pivot_coords: list[int] = CURRENT_BLOCK[0]
-    pivot_x: int = pivot_coords[0]
-    pivot_y: int = pivot_coords[1]
+            new = tuple((block[0], tuple_y))
+            GameState.current_block[i] = new # type: ignore
 
-    for i, block in enumerate(CURRENT_BLOCK):
-        temp: list[int] = block
-        x: int = temp[0]
-        y: int = temp[1]
+    def apply_gravity(self) -> None:
+        """ Puts all blocks down until it hits another block or the floor. """
+        if len(GameState.blocks) > 0:
+            for i, block in enumerate(GameState.blocks):
+                tempx: int = block[0]
+                tempy: int = block[1]
 
-        x_prime: int = x - pivot_x
-        y_prime: int = y - pivot_y
+                incr_x: int = tempx + 1
 
-        x_rot: int = -y_prime
-        y_rot: int = x_prime
+                while incr_x < self.height:
+                    new = tuple((incr_x, tempy))
 
-        x_new: int = x_rot + pivot_x # UD
-        y_new: int = y_rot + pivot_y # LR
+                    if new not in GameState.blocks:
+                        GameState.blocks[i] = new
 
-        final = tuple((x_new, y_new))
-        CURRENT_BLOCK[i] = final # type: ignore
-    else:
-        for p, brack in enumerate(CURRENT_BLOCK):
-            temp: list[int] = brack
-            y: int = temp[1]
+                        incr_x += 1
+                    else:
+                        break
+                else:
+                    GameState.blocks.sort()
+                    return
 
-            if y < 0:
-                shift_into_screen(True)
-                return
+    # Note: inefficient
+    def clear_rows(self) -> None:
+        """ Process: \n
+            1. Sort all blocks, \n
+            2. If the current coordinates x is equal to the coordinate at n + widths position, check if the y at n + width is equal to y + width - 1 \n
+            3. If step 2 is true, then that must mean a row has been filled out. Otherwise, go back to step 2 and increment n. \n
+            4. Delete from the current n to n + width - 1, deleting a row.
+        """
+        GameState.blocks.sort()
+        i: int = 0
 
-            if y > WIDTH - 1:
-                shift_into_screen(False)
-                return
-        else:
-            return
+        if len(GameState.blocks) > self.width:
+            while True:
+                item: list = GameState.blocks[i]
+                x: int = item[0]
+                y: int = item[1]
 
-def update(stdscr, movement: int, fast_fall: int = 0) -> None:  # Return True if should be deleted
-    global SCORE, DROP_WAIT, LEVEL, BLOCKS, CURRENT_BLOCK, HELD_BLOCK, CURRENT_TYPE, WIDTH, HEIGHT
-    #stdscr.addstr(5, 30 , str(CURRENT_BLOCK))
-    #stdscr.addstr(0, 30 , str(BLC_TYPE["I"]))
-    #stdscr.addstr(3, 30 , str(BLOCKS))
+                to_compare: list = GameState.blocks[i + (self.width - 1)]
+                x_compare: int = to_compare[0]
+                y_compare: int = to_compare[1]
 
-    if movement == 2:
-        rotate()
-        movement = 0
-        fast_fall = -1
+                to_delete = list()
+                if x == x_compare:
+                    if (y + (self.width - 1)) == y_compare:
+                        for j in range(i, (i + (self.width)), 1):
+                            to_delete.append(GameState.blocks[j])
 
-    if movement == 3:
-        fast_fall = 1
-        movement = 0
-
-    if movement == 5:
-        movement = -2
+                        count: int = 0
+                        for item in to_delete:
+                            while item in GameState.blocks:
+                                if count >= self.width * 4:
+                                    GameState.score += 4000
     
-    if movement == 6:
-        movement = 2
+                                GameState.blocks.remove(item)
+                                GameState.score += 100
+                                count += 1                    
+                        else:
+                            GameState.level += 1
+                i += 1
 
-    if movement == 4:
-        dict_pos_copy = copy.deepcopy(BLC_TYPE)
-        
-        if HELD_BLOCK == "":
-            CURRENT_BLOCK = list()
-            HELD_BLOCK = CURRENT_TYPE
-            save_blocks()
-            return
-        else:
-            current_copy = CURRENT_TYPE
-            CURRENT_TYPE = HELD_BLOCK
-            HELD_BLOCK = current_copy
-            CURRENT_BLOCK = dict_pos_copy[CURRENT_TYPE]
-            return
+                if (i > len(GameState.blocks) - 1 or (i + (self.width - 1)) > len(GameState.blocks) - 1):
+                    break
 
-    tuples: list[tuple[int, ...]] = [tuple(x) for x in CURRENT_BLOCK]
-
-    # Game Over
-    if all(elem in BLOCKS for elem in tuples):
-        for x in range(HEIGHT):
-            for y in range(WIDTH):
-                stdscr.addstr(x, y, " ")
-            
-        stdscr.nodelay(False)
-        stdscr.addstr(HEIGHT//2, WIDTH//2, "Game Over!")
-        stdscr.addstr(HEIGHT//2 + 10, WIDTH//2, f"Score: {SCORE}")
-        stdscr.addstr(HEIGHT//2 + 20, WIDTH//2, f"Level: {LEVEL}")
-        stdscr.getch()
-        stdscr.timeout(1000)
-        time.sleep(5)
-        quit()
-                
-    for array in CURRENT_BLOCK:
-        arrayx: int = array[0] # UD
-        arrayy: int = array[1] # LR
-
-        if tuple((arrayx + 1, arrayy)) in BLOCKS:
-            save_blocks()
-            return
-    
-        if (arrayx + 1 >= HEIGHT):
-            save_blocks()
-            return
-                
-        if arrayx == HEIGHT:
-            save_blocks()
-            return
-        
-        if tuple((arrayx, arrayy + movement)) in BLOCKS:
-            movement = 0
-
-        if (0<= (arrayy + movement) <= WIDTH - 1) == False:
-            movement = 0
-
-        if tuple((arrayx, (0 <= (arrayy + movement) <= WIDTH - 1))) == False:
-            movement = 0
-                
-    for i, item in enumerate(CURRENT_BLOCK):
-        temp: list[int] = copy.deepcopy(item)
-        x: int = temp[0] # UD
-        y: int = temp[1] # LR
-        new_pos = list()
-
-        if (x + 1 >= HEIGHT) and movement == 0:
-            save_blocks()
-            return
-                
-        if x >= HEIGHT and movement == 0:
-            save_blocks()
-            return
-        
-        if (x + (1 + fast_fall)) >= HEIGHT:
-            fast_fall = -1
-
-        fast_fall_pos = tuple(((x + (1 + fast_fall)), y))
-
-        if  fast_fall_pos in BLOCKS:
-            fast_fall = -1
-                    
-        x += 1 + fast_fall
-
-        if (0<= (y + movement) <= WIDTH - 1) == False:
-            movement = 0
-        
-        y += movement
-
-        new_pos: list = [x, y]
-        blocks_tuples = tuple(new_pos)
-
-        if blocks_tuples in BLOCKS:
-            save_blocks()
-            return
-
-        CURRENT_BLOCK[i] = new_pos
-    return
-
-def render(stdscr) -> None:
-    global SCORE, WIDTH, HEIGHT
-
-    try:
-        stdscr.addstr(0, 0, f"Score: {SCORE}")
-        stdscr.addstr(10, 0, f"Level: {LEVEL}")
-        stdscr.addstr(20, 0, f"Held Block: {HELD_BLOCK}")
-
-        for x in range(HEIGHT):
-            for y in range(WIDTH):
-                x_pos: int = (x * 2) + X_TOP_OFFSET
-                y_pos: int = (y * 2) + Y_TOP_OFFSET
-
-                stdscr.addstr(x_pos, y_pos, SCREEN[x][y])
-
-        for upper in CURRENT_BLOCK:
-            block_x: int = (upper[0] * 2) + X_TOP_OFFSET
-            block_y: int = (upper[1] * 2) + Y_TOP_OFFSET
-
-            stdscr.addstr(block_x, block_y, "O", COLOUR_PAIRS[CURRENT_TYPE])
-
-        for lower in BLOCKS:
-            cblock_x: int = (lower[0] * 2) + X_TOP_OFFSET
-            cblock_y: int = (lower[1] * 2) + Y_TOP_OFFSET
-
-            stdscr.addstr(cblock_x, cblock_y, "#", curses.color_pair(8))
-    except ValueError as e:
-        stdscr.addstr(0, 0, f"Render error: {e}.")
-        return
-    except curses.error as f:
-        stdscr.addstr(0, 0, f"Curses error: {f}. Restart and resize screen.")
-        return
+    def update_gamestate(self) -> None:
+        """ Applies gravity and clears any possible rows """
+        self.apply_gravity()
+        self.clear_rows()
 
 def init_colours() -> None:
+    """ Initializes colour pairs and adds them to the COLOUR_PAIRS dictionairy."""
     global COLOUR_PAIRS
 
     curses.init_pair(1, curses.COLOR_CYAN, curses.COLOR_WHITE)     # I
@@ -403,7 +228,211 @@ def init_colours() -> None:
             'Z': curses.color_pair(7)
     }   
 
+def input_fetcher(key: int) -> int:
+    """ Checks the ordinal value of the key parameter and returns a magic number based on viable inputs. """
+    match key:
+        case 27: # ESC
+            quit()
+        case 97 | 65: # a, A - Move left
+            return -1
+        case 100 | 68: # d, D - Move right
+            return 1
+        case 119| 87: # w, W -Rotate
+            return 2
+        case 115 | 83: # s, S - Fast fall
+            return 3
+        case 114 | 82: # r, R - Hold block
+            return 4
+        case 122 | 90: # Double move left
+            return 5
+        case 120 | 88: # Double move right
+            return 6
+        case _: # Case else
+            return 0
+
+def rotate(game_obj: GameState) -> None:
+    """ Rotates the current block. """
+    pivot_coords: list[int] = GameState.current_block[0]
+    pivot_x: int = pivot_coords[0]
+    pivot_y: int = pivot_coords[1]
+
+    for i, block in enumerate(GameState.current_block):
+        temp: list[int] = block
+        x: int = temp[0]
+        y: int = temp[1]
+
+        x_prime: int = x - pivot_x
+        y_prime: int = y - pivot_y
+
+        x_rot: int = -y_prime
+        y_rot: int = x_prime
+
+        x_new: int = x_rot + pivot_x # UD
+        y_new: int = y_rot + pivot_y # LR
+
+        final = tuple((x_new, y_new))
+        GameState.current_block[i] = final # type: ignore
+    else:
+        for p, brock in enumerate(GameState.current_block):
+            temp: list[int] = brock
+            y: int = temp[1]
+
+            if y < 0:
+                game_obj.shift_blocks(True)
+                return
+
+            if y > game_obj.width - 1:
+                game_obj.shift_blocks(False)
+                return
+
+def game_over(stdscr, game_obj: GameState) -> None:
+    """ Due to how I built the system, game over is only triggered if any block has its origin coordinates, meaning it couldnt move when placed, so it must be game over if that happens."""
+    tupled_current_block = [tuple(x) for x in GameState.current_block]
+
+    if all(elem in GameState.blocks for elem in tupled_current_block):
+        for x in range(game_obj.height):
+            for y in range(game_obj.width):
+                stdscr.addstr(x, y, " ")
+            
+        stdscr.nodelay(False)
+        stdscr.addstr(game_obj.height//2, game_obj.width//2, "Game Over!")
+        stdscr.addstr(game_obj.height//2 + 10, game_obj.width//2, f"Score: {GameState.score}")
+        stdscr.addstr(game_obj.height//2 + 20, game_obj.width//2, f"Level: {GameState.level}")
+        stdscr.getch()
+        stdscr.timeout(1000)
+        time.sleep(5)
+        quit()
+    return
+
+def update(stdscr, movement: int, game_obj: GameState, fast_fall: int = 0):
+    """ Updates the block based on movement, checks if the game over condition is met, and checks if the boundaries are being touched currently and with any movement. """
+    match movement:
+        case 2:
+            rotate(game_obj)
+            movement = 0
+            fast_fall = -1
+        case 3:
+            fast_fall = 1
+            movement = 0
+        case 5:
+            movement = -2
+        case 6:
+            movement = 2
+        case 4:
+            dict_pos_copy = copy.deepcopy(BLOCK_TYPE)
+            
+            if GameState.held_block == "":
+                GameState.current_block = list()
+                GameState.held_block = GameState.current_type
+                game_obj.save_blocks()
+                return
+            else:
+                current_copy = GameState.current_type
+                GameState.current_type = GameState.held_block
+                GameState.held_block = current_copy
+                GameState.current_block = dict_pos_copy[GameState.current_type]
+            return
+
+    game_over(stdscr, game_obj)
+
+    for array in GameState.current_block:
+        arrayx: int = array[0] # UD
+        arrayy: int = array[1] # LR
+
+        if tuple((arrayx + 1, arrayy)) in GameState.blocks:
+            game_obj.save_blocks()
+            return
+    
+        if (arrayx + 1 >= game_obj.height):
+            game_obj.save_blocks()
+            return
+                
+        if arrayx == game_obj.height:
+            game_obj.save_blocks()
+            return
+        
+        if tuple((arrayx, arrayy + movement)) in GameState.blocks:
+            movement = 0
+
+        if (0<= (arrayy + movement) <= game_obj.width - 1) == False:
+            movement = 0
+
+        if tuple((arrayx, (0 <= (arrayy + movement) <= game_obj.width - 1))) == False:
+            movement = 0
+
+    for i, item in enumerate(GameState.current_block):
+        temp: list[int] = copy.deepcopy(item)
+        x: int = temp[0] # UD
+        y: int = temp[1] # LR
+        new_pos = list()
+
+        if (x + 1 >= game_obj.height) and movement == 0:
+            game_obj.save_blocks()
+            return
+                
+        if x >= game_obj.height and movement == 0:
+            game_obj.save_blocks()
+            return
+        
+        if (x + (1 + fast_fall)) >= game_obj.height:
+            fast_fall = -1
+
+        fast_fall_pos = tuple(((x + (1 + fast_fall)), y))
+
+        if  fast_fall_pos in GameState.blocks:
+            fast_fall = -1
+                    
+        x += 1 + fast_fall
+
+        if (0<= (y + movement) <= game_obj.width - 1) == False:
+            movement = 0
+        
+        y += movement
+
+        new_pos: list = [x, y]
+        blocks_tuples = tuple(new_pos)
+
+        if blocks_tuples in GameState.blocks:
+            game_obj.save_blocks()
+            return
+
+        GameState.current_block[i] = new_pos
+
+def render(stdscr, game_obj: GameState):
+    """ Renders the screen, score, level, and current held block type. """
+    try:
+        global SCREEN
+        stdscr.addstr(0, 0, f"Score: {GameState.score}")
+        stdscr.addstr(10, 0, f"Level: {GameState.level}")
+        stdscr.addstr(20, 0, f"Held Block: {GameState.held_block}")
+
+        for x in range(game_obj.height):
+            for y in range(game_obj.width):
+                x_pos: int = (x * 2) + game_obj.x_offset
+                y_pos: int = (y * 2) + game_obj.y_offset
+
+                stdscr.addstr(x_pos, y_pos, SCREEN[x][y])
+
+        for upper in GameState.current_block:
+            block_x: int = (upper[0] * 2) + game_obj.x_offset 
+            block_y: int = (upper[1] * 2) + game_obj.y_offset
+
+            stdscr.addstr(block_x, block_y, "O", COLOUR_PAIRS[GameState.current_type])
+
+        for lower in GameState.blocks:
+            cblock_x: int = (lower[0] * 2) + game_obj.x_offset
+            cblock_y: int = (lower[1] * 2) + game_obj.y_offset
+
+            stdscr.addstr(cblock_x, cblock_y, "#", curses.color_pair(8))
+    except ValueError as e:
+        stdscr.addstr(0, 0, f"Render error: {e}.")
+        return
+    except curses.error as f:
+        stdscr.addstr(0, 0, f"Curses error: {f}. Restart and resize screen.")
+        return
+
 def display_intro_text(stdscr) -> None:
+    """ Displays the intro text: Tetris, version, general info, controls, and known issues. """
     stdscr.addstr(0, 0, r"""
         _______ _______ _______ _______ _______ _______ 
         |\     /|\     /|\     /|\     /|\     /|\     /|
@@ -413,7 +442,7 @@ def display_intro_text(stdscr) -> None:
         |/_____\|/_____\|/_____\|/_____\|/_____\|/_____\|
         """)
 
-    stdscr.addstr(6, 10, "v1.0.1")
+    stdscr.addstr(6, 10, "v1.0.2")
     stdscr.addstr(8, 10, "It is recommended to go fullscreen to avoid errors. Minimum dimension: 800x850 px")
     stdscr.addstr(10, 10, "Controls: A - Left, D - Right, W - Rotate, R - Hold, ESC - Quit, Z - Move 2 spaces left, X - Move 2 spaces right")
     stdscr.addstr(12, 10, "It will say 'curses() ERR' if your screen is not large enough. Restart if this happens.")
@@ -423,51 +452,65 @@ def display_intro_text(stdscr) -> None:
     stdscr.addstr(20, 10, "1. Blocks that rotate on the right edge of the screen when theres a lot of placed blocks get a part of them removed for some reason.")
     stdscr.getch()
 
-def level_up(base_wait: int) -> int:
-    division: int = (LEVEL // 8).__trunc__()
-    base_wait /= max(1, division) # type: ignore
+def validate_dimensions(term_h: int, term_w: int):
+    """ Fetches the width and height from the arguments, validates, and returns them if all checks are passed. """
+    args: list[str] = sys.argv
+    width = ""
+    height = ""
 
-    if base_wait < 100: 
-        base_wait = 100
+    if len(args) == 3:
+        width, height = args[1:]
+    
+    if width.isdigit() and height.isdigit():
+        width = int(width)
+        height = int(height)
 
-    return int(base_wait)
+        wrong: int = 0
 
-def main(stdscr) -> None:
-    global CURRENT_BLOCK, CURRENT_TYPE, X_TOP_OFFSET, Y_TOP_OFFSET
+        if width < term_h:
+            wrong += 1
 
-    display_intro_text(stdscr)
-    curses.start_color()
-    init_colours()    
+        if height < term_w:
+            wrong += 1
 
+        if width < 15:
+            wrong += 1
+
+        if height < 20:
+            wrong += 1
+
+        if wrong == 0:
+            return width, height
+    return 15, 20
+
+def main(stdscr):
     terminal_h: int; terminal_w: int
     terminal_h, terminal_w = stdscr.getmaxyx()
 
-    Y_TOP_OFFSET = (terminal_w // 2) - WIDTH
-    X_TOP_OFFSET = (terminal_h // 2) - HEIGHT
+    width, height = validate_dimensions(term_h=terminal_h, term_w=terminal_w)
+
+    game_state = GameState(width=width, height=height, terminal_h=terminal_h, terminal_w=terminal_w,bg_character=".")
+
+    init_colours()
+    display_intro_text(stdscr)
 
     stdscr.nodelay(True)
 
-    dict_copy = copy.deepcopy(BLC_TYPE)
-    letter: int = random.randint(0, len(LOOKUP_OBJ) - 1)
-    CURRENT_TYPE = LOOKUP_OBJ[letter]
-    CURRENT_BLOCK = dict_copy[LOOKUP_OBJ[letter]]
-    del dict_copy
-    
+    game_state.next_block()
+
     base_wait: int = 240
 
     while True:
         key = stdscr.getch()
-        ordkey = input_fetcher(key)
+        ordkey: int = input_fetcher(key)
 
-        base_wait = level_up(base_wait)
+        base_wait: int = game_state.level_up(base_wait)
         stdscr.timeout(base_wait)
 
         stdscr.clear()
-        update(stdscr, ordkey)
-        gravity()
-        clear_row_n()
-        render(stdscr)
+        update(stdscr, ordkey, game_state)
+        game_state.update_gamestate()
+        render(stdscr, game_state)
 
 if __name__ == "__main__":
     wrapper(main)
-
